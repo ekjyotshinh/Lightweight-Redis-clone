@@ -7,6 +7,12 @@ import time
 store = {}
 store_lock = threading.Lock()
 
+# Configuration parameters for RDB persistence
+config = {
+    b"dir": b"/redis-data",
+    b"dbfilename": b"rdbfile"
+}
+
 
 def main():
     print("Server starting on localhost:6379")
@@ -61,6 +67,9 @@ def handle_client(connection):
             elif command == b"GET" and len(cmd) == 2:
                 response = handle_get_command(cmd)
                 connection.sendall(response)
+            elif command == b"CONFIG" and len(cmd) == 3 and cmd[1].upper() == b"GET":
+                response = handle_get_config_command(cmd)
+                connection.sendall(response)
             else:
                 connection.sendall(b"-ERR unknown command\r\n")
 
@@ -68,6 +77,25 @@ def handle_client(connection):
             buffer = b""
     finally:
         connection.close()
+
+
+def handle_get_config_command(cmd):
+    param = cmd[2].lower()
+    if param in config:
+        response = encode_array([
+            param,
+            config[param]
+        ])
+    else:
+        response = encode_array([])  # empty array if unknown param
+    return response
+
+
+def encode_array(items):
+    out = b"*" + str(len(items)).encode() + b"\r\n"
+    for item in items:
+        out += encode_bulk_string(item)
+    return out
 
 
 def handle_set_command(cmd):
@@ -100,17 +128,25 @@ def handle_set_command(cmd):
 
 def handle_get_command(cmd):
     key = cmd[1]
-    with store_lock:  # lock is automatically released
+    with store_lock:
         entry = store.get(key)
-        # print(entry)
-        # print(time.time())
+
+        # print(f"GET key: {key}")
+        # print(f"Entry found: {entry}")
+        # print(f"Current time: {time.time()}")
+
         if entry is None:
-            return b"$-1\r\n"  # RESP null bulk string
-        if entry["expire_at"] is not None and entry["expire_at"] < time.time():
-            # Key expired, remove it
-            # print("deleteing it")
-            del store[key]
+            # print("Key not found.")
             return b"$-1\r\n"
+
+        expire_at = entry.get("expire_at")
+        if expire_at is not None:
+            # print(f"Key expires at: {expire_at}")
+            if expire_at < time.time():
+                # print("Key expired. Deleting it.")
+                del store[key]
+                return b"$-1\r\n"
+
         return encode_bulk_string(entry["value"])
 
 
@@ -147,6 +183,7 @@ def parse_resp(data):
                 return None
             idx += 1
             elements.append(element)
+        # print(elements)
         return elements
     except Exception:
         return None
