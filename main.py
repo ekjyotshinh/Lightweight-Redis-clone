@@ -1,12 +1,24 @@
 import socket
+import threading
 
 
 def main():
-    print("Logs from your program will appear here!")
+    print("Server starting on localhost:6379")
 
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
     connection, _ = server_socket.accept()
 
+    try:
+        while True:
+            connection, _ = server_socket.accept()
+            thread = threading.Thread(target=handle_client, args=(connection,))
+            thread.daemon = True  # allows threads to be killed with the main process
+            thread.start()
+    finally:
+        server_socket.close()
+
+
+def handle_client(connection):
     try:
         while True:
             data = connection.recv(1024)
@@ -22,7 +34,6 @@ def main():
                     connection.sendall(b"-ERR unknown command\r\n")
     finally:
         connection.close()
-        server_socket.close()
 
 
 if __name__ == "__main__":
