@@ -1,6 +1,9 @@
 import socket
 import threading
 
+# In-memory key-value
+store = {}
+
 
 def main():
     print("Server starting on localhost:6379")
@@ -45,6 +48,19 @@ def handle_client(connection):
                 connection.sendall(b"+PONG\r\n")
             elif command == b"ECHO" and len(cmd) == 2:
                 connection.sendall(encode_bulk_string(cmd[1]))
+            elif command == b"SET" and len(cmd) == 3:
+                key = cmd[1]
+                value = cmd[2]
+                store[key] = value
+                print(store)
+                connection.sendall(b"+OK\r\n")
+            elif command == b"GET" and len(cmd) == 2:
+                key = cmd[1]
+                value = store.get(key, None)
+                if value is None:
+                    connection.sendall(b"$-1\r\n")  # RESP null bulk string
+                else:
+                    connection.sendall(encode_bulk_string(value))
             else:
                 connection.sendall(b"-ERR unknown command\r\n")
 
