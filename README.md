@@ -19,13 +19,13 @@ This project implements a simple, in-memory Redis-like key-value store in Python
 
 ### Commands Supported
 
-| Command                         | Description                       |
-| ------------------------------- | --------------------------------- |
-| `PING`                          | Returns `PONG`                    |
-| `SET key value`                 | Stores a key-value pair           |
-| `SET key value PX <ms>`         | Stores key-value pair with expiry |
-| `GET key`                       | Retrieves value if not expired    |
-| `CONFIG GET dir` / `dbfilename` | Returns current config values     |
+| Command                 | Description                       |
+| ----------------------- | --------------------------------- |
+| `PING`                  | Returns `PONG`                    |
+| `SET key value`         | Stores a key-value pair           |
+| `SET key value PX <ms>` | Stores key-value pair with expiry |
+| `GET key`               | Retrieves value if not expired    |
+| `DEL key`               | Deletes from store if present     |
 
 ---
 
