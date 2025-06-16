@@ -1,6 +1,8 @@
+import os
 import socket
 import threading
 import time
+import json
 
 # In-memory key-value store with expiry support
 # store: key -> {"value": bytes, "expire_at": float|None}
@@ -12,10 +14,15 @@ config = {
     b"dir": b"/redis-data",
     b"dbfilename": b"rdbfile"
 }
+persistence_file = "data.rdb.json"
+dirty = False  # set to True when store changes
 
 
 def main():
     print("Server starting on localhost:6379")
+    load_store_from_file()
+    threading.Thread(target=autosave_thread, daemon=True).start()
+    threading.Thread(target=cleanup_expired_keys, daemon=True).start()
 
     server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
 
@@ -23,10 +30,65 @@ def main():
         while True:
             connection, _ = server_socket.accept()
             thread = threading.Thread(target=handle_client, args=(connection,))
-            thread.daemon = True  # allows threads to be killed with the main process
+            thread.daemon = True
             thread.start()
     finally:
         server_socket.close()
+
+
+def load_store_from_file(path=persistence_file):
+    global store
+    if not os.path.exists(path):
+        return
+    with open(path, "r") as f:
+        raw = json.load(f)
+    now = time.time()
+    with store_lock:
+        for k, v in raw.items():
+            if v["expire_at"] is None or v["expire_at"] > now:
+                store[k.encode()] = {
+                    "value": v["value"].encode(),
+                    "expire_at": v["expire_at"]
+                }
+
+
+def save_store_to_file(path=persistence_file):
+    global dirty
+    now = time.time()
+
+    with store_lock:
+        serializable = {
+            k.decode(): {
+                "value": v["value"].decode(),
+                "expire_at": v["expire_at"]
+            }
+            for k, v in store.items()
+            if v["expire_at"] is None or v["expire_at"] > now
+        }
+        dirty = False
+
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w") as f:
+        json.dump(serializable, f)
+    os.replace(tmp_path, path)
+
+
+def autosave_thread(interval=5):
+    while True:
+        time.sleep(interval)
+        if dirty:
+            save_store_to_file()
+
+
+def cleanup_expired_keys(interval=10):
+    while True:
+        time.sleep(interval)
+        now = time.time()
+        with store_lock:
+            expired = [k for k, v in store.items() if v["expire_at"]
+                       is not None and v["expire_at"] < now]
+            for k in expired:
+                del store[k]
 
 
 def handle_client(connection):
@@ -38,7 +100,6 @@ def handle_client(connection):
                 break
             buffer += data
 
-            # Try parsing command
             cmd = parse_resp(buffer)
             if cmd is None:
                 # it is a simple command
@@ -47,7 +108,6 @@ def handle_client(connection):
                     buffer = b""
                     continue
                 elif buffer.strip():
-                    # Unknown inline command (not RESP)
                     connection.sendall(b"-ERR unknown command\r\n")
                     buffer = b""
                     continue
@@ -66,6 +126,9 @@ def handle_client(connection):
                 connection.sendall(response)
             elif command == b"GET" and len(cmd) == 2:
                 response = handle_get_command(cmd)
+                connection.sendall(response)
+            elif command == b"DEL" and len(cmd) == 2:
+                response = handle_del_command(cmd)
                 connection.sendall(response)
             elif command == b"CONFIG" and len(cmd) == 3 and cmd[1].upper() == b"GET":
                 response = handle_get_config_command(cmd)
@@ -91,38 +154,24 @@ def handle_get_config_command(cmd):
     return response
 
 
-def encode_array(items):
-    out = b"*" + str(len(items)).encode() + b"\r\n"
-    for item in items:
-        out += encode_bulk_string(item)
-    return out
-
-
 def handle_set_command(cmd):
-    """
-    SET key value [PX milliseconds]
-    """
     key = cmd[1]
     value = cmd[2]
     expire_at = None
 
-    # Optional PX argument
-    if len(cmd) > 3:
-        # Must be exactly 5 elements for PX usage
-        if len(cmd) == 5 and cmd[3].upper() == b"PX":
-            try:
-                ms = int(cmd[4])
-                expire_at = time.time() + ms / 1000
-                # print(f"Current time: {time.time()}")
-                # print(f"Key expires at Unix time: {expire_at}")
-            except ValueError:
-                return b"-ERR PX value is not an integer\r\n"
-        else:
-            return b"-ERR syntax error\r\n"
+    if len(cmd) == 5 and cmd[3].upper() == b"PX":
+        try:
+            ms = int(cmd[4])
+            expire_at = time.time() + ms / 1000
+        except ValueError:
+            return b"-ERR PX value is not an integer\r\n"
+    elif len(cmd) not in [3, 5]:
+        return b"-ERR syntax error\r\n"
 
-    with store_lock:  # lock is automatically released
+    with store_lock:
+        global dirty
+        dirty = True
         store[key] = {"value": value, "expire_at": expire_at}
-        # print(store)
     return b"+OK\r\n"
 
 
@@ -140,18 +189,34 @@ def handle_get_command(cmd):
             return b"$-1\r\n"
 
         expire_at = entry.get("expire_at")
-        if expire_at is not None:
-            # print(f"Key expires at: {expire_at}")
-            if expire_at < time.time():
-                # print("Key expired. Deleting it.")
-                del store[key]
-                return b"$-1\r\n"
+        if expire_at is not None and expire_at < time.time():
+            del store[key]
+            return b"$-1\r\n"
 
         return encode_bulk_string(entry["value"])
 
 
+def handle_del_command(cmd):
+    key = cmd[1]
+    with store_lock:
+        global dirty
+        if key in store:
+            del store[key]
+            dirty = True
+            return b":1\r\n"
+        else:
+            return b":0\r\n"
+
+
 def encode_bulk_string(s):
     return b"$" + str(len(s)).encode() + b"\r\n" + s + b"\r\n"
+
+
+def encode_array(items):
+    out = b"*" + str(len(items)).encode() + b"\r\n"
+    for item in items:
+        out += encode_bulk_string(item)
+    return out
 
 
 def parse_resp(data):
@@ -170,9 +235,7 @@ def parse_resp(data):
         elements = []
         idx = 1
         for _ in range(num_elements):
-            if idx >= len(lines):
-                return None
-            if not lines[idx].startswith(b'$'):
+            if idx >= len(lines) or not lines[idx].startswith(b'$'):
                 return None
             length = int(lines[idx][1:])
             idx += 1
