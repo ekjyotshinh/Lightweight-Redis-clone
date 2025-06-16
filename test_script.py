@@ -98,6 +98,67 @@ test_sequences = [
         (b"*3\r\n$6\r\nCONFIG\r\n$3\r\nGET\r\n$10\r\ndbfilename\r\n",
          b"*2\r\n$10\r\ndbfilename\r\n$7\r\nrdbfile\r\n", 0)
     ],
+    [
+        # DEL existing key
+        (b"*3\r\n$3\r\nSET\r\n$3\r\nabc\r\n$3\r\nxyz\r\n", b"+OK\r\n", 0),
+        (b"*2\r\n$3\r\nDEL\r\n$3\r\nabc\r\n", b":1\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$3\r\nabc\r\n", b"$-1\r\n", 0),
+    ],
+    [
+        # DEL non-existing key
+        (b"*2\r\n$3\r\nDEL\r\n$6\r\nnotkey\r\n", b":0\r\n", 0),
+    ],
+    [
+        # PING RESP
+        (b"*1\r\n$4\r\nPING\r\n", b"+PONG\r\n", 0),
+    ],
+    [
+        # PING plain text
+        (b"PING\r\n", b"+PONG\r\n", 0),
+    ],
+    [
+        # Unknown command
+        (b"*1\r\n$7\r\nNOEXIST\r\n", b"-ERR unknown command\r\n", 0),
+    ],
+    [
+        # Overwrite value
+        (b"*3\r\n$3\r\nSET\r\n$4\r\nsame\r\n$5\r\nfirst\r\n", b"+OK\r\n", 0),
+        (b"*3\r\n$3\r\nSET\r\n$4\r\nsame\r\n$6\r\nsecond\r\n", b"+OK\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$4\r\nsame\r\n", b"$6\r\nsecond\r\n", 0),
+    ],
+    # 🔁 Overwrite value
+    [
+        (b"*3\r\n$3\r\nSET\r\n$3\r\none\r\n$3\r\nONE\r\n", b"+OK\r\n", 0),
+        (b"*3\r\n$3\r\nSET\r\n$3\r\none\r\n$3\r\nTWO\r\n", b"+OK\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$3\r\none\r\n", b"$3\r\nTWO\r\n", 0),
+    ],
+    # 🧪 Multiple GETs after SETs
+    [
+        (b"*3\r\n$3\r\nSET\r\n$3\r\nkey\r\n$3\r\nval\r\n", b"+OK\r\n", 0),
+        (b"*3\r\n$3\r\nSET\r\n$4\r\nname\r\n$4\r\njohn\r\n", b"+OK\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n", b"$3\r\nval\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$4\r\nname\r\n", b"$4\r\njohn\r\n", 0),
+    ],
+    # ⏳ Multiple keys with PX, mix of expired and not
+    [
+        (b"*5\r\n$3\r\nSET\r\n$5\r\nfast1\r\n$3\r\n123\r\n$2\r\nPX\r\n$3\r\n100\r\n", b"+OK\r\n", 0),
+        (b"*5\r\n$3\r\nSET\r\n$5\r\nslow1\r\n$3\r\n999\r\n$2\r\nPX\r\n$4\r\n2000\r\n", b"+OK\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$5\r\nfast1\r\n", b"$3\r\n123\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$5\r\nslow1\r\n", b"$3\r\n999\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$5\r\nfast1\r\n", b"$-1\r\n", 0.15),
+        (b"*2\r\n$3\r\nGET\r\n$5\r\nslow1\r\n", b"$3\r\n999\r\n", 0),
+    ],
+    # 🧱 Long key and long value
+    [
+        (b"*3\r\n$3\r\nSET\r\n$10\r\nbigkey1234\r\n$20\r\n" +
+         b"x" * 20 + b"\r\n", b"+OK\r\n", 0),
+        (b"*2\r\n$3\r\nGET\r\n$10\r\nbigkey1234\r\n",
+         b"$20\r\n" + b"x" * 20 + b"\r\n", 0),
+    ],
+    # 🔎 GET non-existent key
+    [
+        (b"*2\r\n$3\r\nGET\r\n$7\r\nmissing\r\n", b"$-1\r\n", 0),
+    ],
 ]
 
 # Run each test sequence
