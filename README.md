@@ -4,7 +4,7 @@ This project implements a simple, in-memory Redis-like key-value store in Python
 
 ---
 
-## 🚀 Features
+## Features
 
 -   In-memory key-value storage
 -   Key expiration via `SET key value PX milliseconds`
@@ -29,14 +29,14 @@ This project implements a simple, in-memory Redis-like key-value store in Python
 
 ---
 
-## 🧪 Running the Server
+## Running the Server
 
-### 🔧 Requirements
+### Requirements
 
 -   Python 3.7+
 -   Linux/macOS (`nc` used in tests)
 
-### ▶️ Start the Server
+### Start the Server
 
 ```bash
 python3 main.py
